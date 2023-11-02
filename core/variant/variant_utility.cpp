@@ -976,11 +976,12 @@ void VariantUtilityFunctions::print(const Variant **p_args, int p_arg_count, Cal
 	r_error.error = Callable::CallError::CALL_OK;
 }
 
-void VariantUtilityFunctions::watch(const Variant &arg) {
+Variant VariantUtilityFunctions::watch(Variant arg) {
 	ScriptLanguage* script_lang = GDScriptLanguage::get_singleton();
 	String source = script_lang->debug_get_stack_level_source(0);
 	int line = script_lang->debug_get_stack_level_line(0);
 	Input::get_singleton()->emit_signal(SNAME("watch"), source, line, arg);
+	return arg;
 }
 
 void VariantUtilityFunctions::print_rich(const Variant **p_args, int p_arg_count, Callable::CallError &r_error) {
@@ -1806,7 +1807,7 @@ void Variant::_register_variant_utility_functions() {
 	FUNCBINDVARARGS(str, sarray(), Variant::UTILITY_FUNC_TYPE_GENERAL);
 	FUNCBINDR(error_string, sarray("error"), Variant::UTILITY_FUNC_TYPE_GENERAL);
 	FUNCBINDR(type_string, sarray("type"), Variant::UTILITY_FUNC_TYPE_GENERAL);
-	FUNCBIND(watch, sarray("obj"), Variant::UTILITY_FUNC_TYPE_GENERAL);
+	FUNCBINDR(watch, sarray("obj"), Variant::UTILITY_FUNC_TYPE_GENERAL);
 	FUNCBINDVARARGV(print, sarray(), Variant::UTILITY_FUNC_TYPE_GENERAL);
 	FUNCBINDVARARGV(print_rich, sarray(), Variant::UTILITY_FUNC_TYPE_GENERAL);
 	FUNCBINDVARARGV(printerr, sarray(), Variant::UTILITY_FUNC_TYPE_GENERAL);
