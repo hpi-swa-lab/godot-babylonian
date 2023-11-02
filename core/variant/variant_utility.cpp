@@ -980,7 +980,11 @@ Variant VariantUtilityFunctions::watch(Variant arg) {
 	ScriptLanguage* script_lang = GDScriptLanguage::get_singleton();
 	String source = script_lang->debug_get_stack_level_source(0);
 	int line = script_lang->debug_get_stack_level_line(0);
-	Input::get_singleton()->emit_signal(SNAME("watch"), source, line, arg);
+	Array data;
+	data.push_back(source);
+	data.push_back(line);
+	data.push_back(arg);
+	EngineDebugger::get_singleton()->send_message("watch:watch", data);
 	return arg;
 }
 
