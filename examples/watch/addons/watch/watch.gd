@@ -1,83 +1,152 @@
 @tool
 extends EditorPlugin
+class_name WatchPlugin
 
-var annotations = []
+var watches: Array[Watch] = []
+
+var current_text_edit: TextEdit = null
+
+class WatchEditorDebugger extends EditorDebuggerPlugin:
+	var plugin: WatchPlugin
+
+	func _has_capture(prefix):
+		return prefix == "watch"
+
+	func _capture(message, data, session_id):
+		if message == "watch:watch":
+			var source = data[0]
+			var line = data[1]
+			var value = data[2]
+			plugin.on_watch(source, line, value)
+			# we handled the message
+			return true
+
+var debugger = WatchEditorDebugger.new()
 
 func _enter_tree():
 	# Initialization of the plugin goes here.
 	get_viewport().connect("gui_focus_changed", Callable(self, "_on_gui_focus_changed"))
+	debugger.plugin = self
+	add_debugger_plugin(debugger)
+
+func _exit_tree():
+	remove_debugger_plugin(debugger)
+
+func on_watch(source: String, line: int, value: Variant):
+	var watch = find_or_create_watch_for(source, line)
+	watch.update_value(value)
+
+func find_or_create_watch_for(source: String, line: int) -> Watch:
+	for watch in watches:
+		if watch.source == source and watch.line == line:
+			return watch
+	var watch = Watch.new()
+	watch.source = source
+	watch.line = line
+	watches.append(watch)
+	if current_text_edit != null:
+		watch.create_annotation(current_text_edit)
+	return watch
 
 func _on_gui_focus_changed(node: Node):
 	if node is TextEdit:
-		for child in node.get_children():
-			if child is ColorRect or child is RichTextLabel:
-				child.queue_free()
+		for watch in watches:
+			watch.remove_annotation()
 
-		var colorRect = ColorRect.new()
-		colorRect.color = Color.REBECCA_PURPLE
-		var annotation = Annotation.new()
-
-		annotation.set_node(colorRect)
-		var line = 20
-		annotation.set_line(line)
-		print(len(node.get_line(line)))
-		annotation.set_column(len(node.get_line(line)))
-		node.add_child(colorRect)
-		annotation.update()
-		annotations.append(annotation)
-
-		var textLabel = RichTextLabel.new()
-		textLabel.text = "Mariuus"
-		textLabel.fit_content = true
-		textLabel.text_direction = 0
-		textLabel.autowrap_mode = TextServer.AUTOWRAP_OFF
-
-		var textAnnotation = Annotation.new()
-		textAnnotation.set_node(textLabel)
-		textAnnotation.set_line(33)
-		node.add_child(textLabel)
-		textAnnotation.set_to_line_end()
-
-		textAnnotation.update()
-		annotations.append(textAnnotation)
+		for watch in watches:
+			watch.create_annotation(node)
+		current_text_edit = node
+	else:
+		current_text_edit = null
 
 func _process(delta):
-	for annotation in annotations:
-		var anno = (annotation as Annotation)
-		if is_instance_valid(anno.node) and anno.node is RichTextLabel:
-			(anno.node as RichTextLabel).text = str(delta)
-		anno.update()
+	for watch in watches:
+		watch.update()
+
+const ANNOTATION_OFFSET = Vector2(40, 0)
 
 class Annotation:
 	var line = 0
-	var column = 0
 	var node: Control
-	var lastScrollPos
+	var last_scroll_pos
+	var last_column
+
+	func is_valid():
+		return is_instance_valid(node) and is_watch_valid()
+
+	func get_text_edit() -> TextEdit:
+		return node.get_parent() as TextEdit
+
+	func is_watch_valid() -> bool:
+		return get_text_edit().get_line(line).contains("watch(")
 
 	func update():
-		if not is_instance_valid(node): return
-		var parent = node.get_parent() as TextEdit
-		if parent.scroll_vertical == lastScrollPos:
+		var text_edit = get_text_edit()
+		var column = len(text_edit.get_line(line))
+		if text_edit.scroll_vertical == last_scroll_pos and last_column == column:
 			return
-		else:
-			lastScrollPos = parent.scroll_vertical
-		var rect = parent.get_rect_at_line_column(line, column)
+		last_scroll_pos = text_edit.scroll_vertical
+		last_column = column
+		var rect = text_edit.get_rect_at_line_column(line, column)
 		if rect.position.y >= 0:
 			node.show()
-			node.set_position(Vector2(rect.end.x, rect.position.y))
+			node.set_position(Vector2(rect.end.x, rect.position.y) + ANNOTATION_OFFSET)
 		else:
 			node.hide()
-#		node.set_size(rect.size)
 
 	func set_line(line: int):
 		self.line = line
 
-	func set_column(column: int):
-		self.column = column
-
 	func set_node(node: Control):
 		self.node = node
 
-	func set_to_line_end():
-		var parent = node.get_parent() as TextEdit
-		self.set_column(len(parent.get_line(line)))
+class Watch:
+	var source: String
+	var line: int
+	var current_value: Variant
+	var current_annotation: Annotation
+
+	func belongs_to_text_edit(text_edit: TextEdit) -> bool:
+		# TODO
+		return true
+
+	func create_annotation(text_edit: TextEdit) -> Annotation:
+		if not belongs_to_text_edit(text_edit):
+			return
+
+		var textLabel = RichTextLabel.new()
+		textLabel.fit_content = true
+		textLabel.text_direction = Control.TEXT_DIRECTION_LTR
+		textLabel.autowrap_mode = TextServer.AUTOWRAP_OFF
+
+		var annotation = Annotation.new()
+		annotation.set_node(textLabel)
+		annotation.set_line(line - 1) # Godot source uses 1-indexing, TextEdit uses 0-indexing
+		text_edit.add_child(textLabel)
+		annotation.update()
+
+		current_annotation = annotation
+		update_annotation_display()
+		return annotation
+
+	func update():
+		if current_annotation != null:
+			if current_annotation.is_valid():
+				current_annotation.update()
+			else:
+				print("removing annotation")
+				remove_annotation()
+
+	func update_value(new_value: Variant):
+		current_value = new_value
+		update_annotation_display()
+
+	func update_annotation_display():
+		if current_annotation != null:
+			current_annotation.node.text = str(current_value)
+
+	func remove_annotation():
+		if current_annotation == null:
+			return
+		current_annotation.node.queue_free()
+		current_annotation = null
